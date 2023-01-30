@@ -16,7 +16,12 @@ convertButton.onclick = function(){
         reader.addEventListener( 'load', function ( event ) {
             var font = opentype.parse(event.target.result);
             var result = convert(font);
-            exportString(result,font.familyName + "_" + font.styleName + ( filetypeJson.checked ? ".json" : ".js" ) );
+            var fontName = font.names.fontFamily.en;
+            var styleName = font.names.fontSubfamily.en;
+
+            //const fileName = font.familyName + "_" + font.styleName + ( filetypeJson.checked ? ".json" : ".js" );
+            const fileName = fontName + "_" + styleName + ( filetypeJson.checked ? ".json" : ".js" );
+            exportString(result, fileName );
         }, false );
         reader.readAsArrayBuffer( file );
     });
@@ -51,6 +56,9 @@ var convert = function(font){
     console.log(font);
 
     var scale = (1000 * 100) / ( (font.unitsPerEm || 2048) *72);
+
+    var foundCharcters = [];
+
     var result = {};
     result.glyphs = {};
 
@@ -73,7 +81,11 @@ var convert = function(font){
 		}
 	}
 	
-    font.glyphs.forEach(function(glyph){
+    if (restriction && restriction.set) {
+        restriction.set = [...new Set( restriction.set)];
+    }
+
+    Object.values(font.glyphs.glyphs).forEach(function(glyph){
         if (glyph.unicode !== undefined) {
 			var glyphCharacter = String.fromCharCode (glyph.unicode);
 			var needToExport = true;
@@ -83,13 +95,15 @@ var convert = function(font){
 				needToExport = (restrictCharacterSetInput.value.indexOf (glyphCharacter) != -1);
 			}
             if (needToExport) {
-
 				var token = {};
 				token.ha = Math.round(glyph.advanceWidth * scale);
 				token.x_min = Math.round(glyph.xMin * scale);
 				token.x_max = Math.round(glyph.xMax * scale);
 				token.o = ""
-				if (reverseTypeface.checked) {glyph.path.commands = reverseCommands(glyph.path.commands);}
+				if (reverseTypeface.checked) {glyph.path.commands = reverseCommands(glyph.path.commands, token.name);}
+                if (!glyph.path.commands){
+                    return;
+                }
 				glyph.path.commands.forEach(function(command,i){
 					if (command.type.toLowerCase() === "c") {command.type = "b";}
 					token.o += command.type.toLowerCase();
@@ -114,10 +128,19 @@ var convert = function(font){
 					}
 				});
 				result.glyphs[String.fromCharCode(glyph.unicode)] = token;
+                foundCharcters.push(glyphCharacter);
 			}
         };
     });
-    result.familyName = font.familyName;
+
+    if (restriction && restriction.set && restriction.set.length > 0) {
+        const missingCharacters = restriction.set.filter(character => foundCharcters.indexOf(character) < 0 && character != '   ' );
+        if (missingCharacters.length > 0) {
+            window.alert("Missing characters: " + missingCharacters.toString());
+        }
+    }
+
+    result.familyName = font.names.fontFamily;
     result.ascender = Math.round(font.ascender * scale);
     result.descender = Math.round(font.descender * scale);
     result.underlinePosition = Math.round(font.tables.post.underlinePosition * scale);
@@ -130,13 +153,15 @@ var convert = function(font){
     };
     result.resolution = 1000;
     result.original_font_information = font.tables.name;
-    if (font.styleName.toLowerCase().indexOf("bold") > -1){
+    // var styleName = font.styleName;
+     var styleName = font.names.fontSubfamily.en;
+    if (styleName && styleName.toLowerCase().indexOf("bold") > -1){
         result.cssFontWeight = "bold";
     } else {
         result.cssFontWeight = "normal";
     };
 
-    if (font.styleName.toLowerCase().indexOf("italic") > -1){
+    if (styleName && styleName.toLowerCase().indexOf("italic") > -1){
         result.cssFontStyle = "italic";
     } else {
         result.cssFontStyle = "normal";
@@ -149,7 +174,7 @@ var convert = function(font){
     }
 };
 
-var reverseCommands = function(commands){
+var reverseCommands = function(commands, name){
     
     var paths = [];
     var path;
@@ -159,10 +184,17 @@ var reverseCommands = function(commands){
             path = [c];
             paths.push(path);
         } else if (c.type.toLowerCase() !== "z") {
+            if (!path) {
+                console.warn("Glyph didn't have type m: may not render correctly" + name);
+                return;
+            }
             path.push(c);
         }
     });
-    
+    if (!path) {
+        return false;
+    }
+
     var reversed = [];
     paths.forEach(function(p){
         var result = {"type":"m" , "x" : p[p.length-1].x, "y": p[p.length-1].y};
