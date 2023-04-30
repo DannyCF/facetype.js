@@ -99,6 +99,10 @@ var convert = function(font){
 				token.ha = Math.round(glyph.advanceWidth * scale);
 				token.x_min = Math.round(glyph.xMin * scale);
 				token.x_max = Math.round(glyph.xMax * scale);
+                if (!token.x_min && !token.x_max) {
+                    token.x_min = 0;
+                    token.x_max = token.ha;
+                }
 				token.o = ""
 				if (reverseTypeface.checked) {glyph.path.commands = reverseCommands(glyph.path.commands, token.name);}
                 if (!glyph.path.commands){
